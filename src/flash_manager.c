@@ -1,98 +1,16 @@
 #include "flash_manager.h"
+#include "wl_config.h"
+#include "wl_hal.h"
 #include <string.h>
-
-/* ------------------------------------------------------------------ */
-/* Manual register definitions — no CMSIS dependency                    */
-/* ------------------------------------------------------------------ */
-#define FLASH_BASE_ADDR     0x08000000UL
-#define FLASH_R_BASE        0x40023C00UL
-
-#define FLASH_ACR           (*(volatile uint32_t *)(FLASH_R_BASE + 0x00))
-#define FLASH_KEYR          (*(volatile uint32_t *)(FLASH_R_BASE + 0x04))
-#define FLASH_SR            (*(volatile uint32_t *)(FLASH_R_BASE + 0x0C))
-#define FLASH_CR            (*(volatile uint32_t *)(FLASH_R_BASE + 0x10))
-#define FLASH_AR            (*(volatile uint32_t *)(FLASH_R_BASE + 0x14))
-
-#define FLASH_SR_BSY        (1UL << 16)
-#define FLASH_SR_PGSERR     (1UL << 7)
-#define FLASH_SR_PGPERR     (1UL << 6)
-#define FLASH_SR_PGAERR     (1UL << 5)
-#define FLASH_CR_LOCK       (1UL << 31)
-#define FLASH_CR_PER        (1UL << 1)
-#define FLASH_CR_PG         (1UL << 0)
-#define FLASH_CR_STRT       (1UL << 16)
-
-#define FLASH_TOTAL_SIZE    (256U * 1024U)
-#define WL_BASE_ADDR        (FLASH_BASE_ADDR + FLASH_TOTAL_SIZE - (FLASH_PAGES_FOR_WL * FLASH_PAGE_SIZE))
-
-#define PAGE0_ADDR          WL_BASE_ADDR
-#define PAGE1_ADDR          (WL_BASE_ADDR + FLASH_PAGE_SIZE)
 
 static uint32_t active_page = 0;
 static uint32_t next_record_offset = sizeof(PageHeader_t);
+static uint32_t g_page_addrs[WL_PAGE_COUNT];
 
 /* ------------------------------------------------------------------ */
 static uint32_t GetPageAddr(uint8_t idx)
 {
-    return (idx == 0) ? PAGE0_ADDR : PAGE1_ADDR;
-}
-
-static FlashStatus_t Flash_ErasePage(uint32_t page_addr)
-{
-    (void)page_addr; /* unused for F401 — we erase by sector, not arbitrary addr */
-
-    /* Unlock */
-    if (FLASH_CR & FLASH_CR_LOCK) {
-        FLASH_KEYR = 0x45670123;
-        FLASH_KEYR = 0xCDEF89AB;
-    }
-
-    while (FLASH_SR & FLASH_SR_BSY);
-
-    FLASH_CR |= FLASH_CR_PER;
-    FLASH_AR  = page_addr;
-    FLASH_CR |= FLASH_CR_STRT;
-
-    while (FLASH_SR & FLASH_SR_BSY);
-
-    if (FLASH_SR & (FLASH_SR_PGSERR | FLASH_SR_PGPERR | FLASH_SR_PGAERR)) {
-        FLASH_SR |= (FLASH_SR_PGSERR | FLASH_SR_PGPERR | FLASH_SR_PGAERR);
-        FLASH_CR &= ~FLASH_CR_PER;
-        FLASH_CR |= FLASH_CR_LOCK;
-        return FLASH_ERROR;
-    }
-
-    FLASH_CR &= ~FLASH_CR_PER;
-    FLASH_CR |= FLASH_CR_LOCK;
-    return FLASH_OK;
-}
-
-static FlashStatus_t Flash_Program(uint32_t addr, const uint8_t *data, uint16_t len)
-{
-    if (addr & 0x3U) return FLASH_ERROR;
-
-    if (FLASH_CR & FLASH_CR_LOCK) {
-        FLASH_KEYR = 0x45670123;
-        FLASH_KEYR = 0xCDEF89AB;
-    }
-
-    FLASH_CR |= FLASH_CR_PG;
-
-    for (uint16_t i = 0; i < len; i += 4) {
-        while (FLASH_SR & FLASH_SR_BSY);
-
-        uint32_t word = 0xFFFFFFFFUL;
-        uint16_t copy = (len - i < 4) ? (len - i) : 4;
-        memcpy(&word, &data[i], copy);
-
-        *(volatile uint32_t *)(addr + i) = word;
-
-        while (FLASH_SR & FLASH_SR_BSY);
-    }
-
-    FLASH_CR &= ~FLASH_CR_PG;
-    FLASH_CR |= FLASH_CR_LOCK;
-    return FLASH_OK;
+    return g_page_addrs[idx];
 }
 
 static uint16_t CalcChecksum(const uint8_t *data, uint16_t len)
@@ -122,32 +40,39 @@ static bool IsPageFull(uint32_t page_addr)
 /* ------------------------------------------------------------------ */
 FlashStatus_t WL_Init(void)
 {
-    bool p0_active = IsPageActive(PAGE0_ADDR);
-    bool p1_active = IsPageActive(PAGE1_ADDR);
-    bool p0_full   = IsPageFull(PAGE0_ADDR);
+    const wl_hal_t *hal = wl_hal_get();
+    
+    /* Init page addresses from HAL */
+    for (uint8_t i = 0; i < WL_PAGE_COUNT; i++) {
+        g_page_addrs[i] = hal->get_sector_addr(i);
+    }
 
-    if (p0_active && !p1_active) {
-        active_page = 0;
-    } else if (p1_active && !p0_active) {
-        active_page = 1;
-    } else if (!p0_active && !p1_active) {
-        Flash_ErasePage(PAGE0_ADDR);
-        PageHeader_t hdr = {WL_MAGIC, 0, WL_STATUS_ACTIVE, 0};
-        Flash_Program(PAGE0_ADDR, (uint8_t *)&hdr, sizeof(hdr));
-        active_page = 0;
-    } else if (p0_full && !p1_active) {
-        Flash_ErasePage(PAGE1_ADDR);
-        PageHeader_t hdr = {WL_MAGIC, 0, WL_STATUS_ACTIVE, 0};
-        Flash_Program(PAGE1_ADDR, (uint8_t *)&hdr, sizeof(hdr));
-        active_page = 1;
-    } else {
-        Flash_ErasePage(PAGE0_ADDR);
-        Flash_ErasePage(PAGE1_ADDR);
-        PageHeader_t hdr = {WL_MAGIC, 0, WL_STATUS_ACTIVE, 0};
-        Flash_Program(PAGE0_ADDR, (uint8_t *)&hdr, sizeof(hdr));
+    /* Scan all pages to find the active one (highest sequence number) */
+    uint32_t max_seq = 0;
+    bool found_active = false;
+    
+    for (uint8_t i = 0; i < WL_PAGE_COUNT; i++) {
+        PageHeader_t *hdr = (PageHeader_t *)g_page_addrs[i];
+        if (hdr->magic == WL_MAGIC && hdr->status == WL_STATUS_ACTIVE) {
+            if (hdr->sequence >= max_seq) {
+                max_seq = hdr->sequence;
+                active_page = i;
+                found_active = true;
+            }
+        }
+    }
+
+    /* No active page found — initialize from scratch */
+    if (!found_active) {
+        for (uint8_t i = 0; i < WL_PAGE_COUNT; i++) {
+            hal->erase(g_page_addrs[i]);
+        }
+        PageHeader_t hdr = {WL_MAGIC, 0, WL_STATUS_ACTIVE, 1}; /* sequence starts at 1 */
+        hal->program(g_page_addrs[0], (uint8_t *)&hdr, sizeof(hdr));
         active_page = 0;
     }
 
+    /* Find next free record slot */
     uint32_t addr = GetPageAddr(active_page) + sizeof(PageHeader_t);
     next_record_offset = sizeof(PageHeader_t);
 
@@ -163,6 +88,8 @@ FlashStatus_t WL_Init(void)
 
 FlashStatus_t WL_WriteRecord(uint16_t id, const uint8_t *data, uint16_t len)
 {
+    const wl_hal_t *hal = wl_hal_get();
+    
     if (len > (FLASH_RECORD_SIZE - 8U)) return FLASH_ERROR;
 
     WL_DeleteRecord(id);
@@ -180,7 +107,7 @@ FlashStatus_t WL_WriteRecord(uint16_t id, const uint8_t *data, uint16_t len)
     rec.checksum = CalcChecksum(data, len);
 
     uint32_t addr = GetPageAddr(active_page) + next_record_offset;
-    FlashStatus_t st = Flash_Program(addr, (uint8_t *)&rec, sizeof(rec));
+    FlashStatus_t st = (hal->program(addr, (uint8_t *)&rec, sizeof(rec)) == 0) ? FLASH_OK : FLASH_ERROR;
     if (st != FLASH_OK) return st;
 
     next_record_offset += sizeof(FlashRecord_t);
@@ -189,7 +116,7 @@ FlashStatus_t WL_WriteRecord(uint16_t id, const uint8_t *data, uint16_t len)
 
 FlashStatus_t WL_ReadRecord(uint16_t id, uint8_t *out, uint16_t max_len, uint16_t *out_len)
 {
-    for (uint8_t p = 0; p < 2; p++) {
+    for (uint8_t p = 0; p < WL_PAGE_COUNT; p++) {
         uint32_t page_addr = GetPageAddr(p);
         if (!IsPageActive(page_addr) && !IsPageFull(page_addr)) continue;
 
@@ -215,6 +142,7 @@ FlashStatus_t WL_ReadRecord(uint16_t id, uint8_t *out, uint16_t max_len, uint16_
 
 FlashStatus_t WL_DeleteRecord(uint16_t id)
 {
+    const wl_hal_t *hal = wl_hal_get();
     uint32_t page_addr = GetPageAddr(active_page);
     uint32_t offset = sizeof(PageHeader_t);
 
@@ -225,7 +153,7 @@ FlashStatus_t WL_DeleteRecord(uint16_t id)
         if (rec->id == id && rec->len != 0) {
             uint32_t addr = page_addr + offset + offsetof(FlashRecord_t, len);
             uint16_t zero = 0;
-            Flash_Program(addr, (uint8_t *)&zero, sizeof(zero));
+            hal->program(addr, (uint8_t *)&zero, sizeof(zero));
             return FLASH_OK;
         }
         offset += sizeof(FlashRecord_t);
@@ -235,35 +163,65 @@ FlashStatus_t WL_DeleteRecord(uint16_t id)
 
 FlashStatus_t WL_GarbageCollect(void)
 {
+    const wl_hal_t *hal = wl_hal_get();
     uint32_t src_page = active_page;
-    uint32_t dst_page = (active_page == 0) ? 1 : 0;
+    uint8_t dst_idx = 0xFF;
+    uint32_t min_seq = 0xFFFFFFFF;
 
-    Flash_ErasePage(GetPageAddr(dst_page));
+    /* 1. Try to find an EMPTY page first */
+    for (uint8_t i = 0; i < WL_PAGE_COUNT; i++) {
+        if (i == src_page) continue;
+        PageHeader_t *hdr = (PageHeader_t *)g_page_addrs[i];
+        if (hdr->magic != WL_MAGIC || hdr->status == WL_STATUS_EMPTY) {
+            dst_idx = i;
+            break;
+        }
+    }
 
+    /* 2. Otherwise, pick the page with the lowest sequence (oldest) */
+    if (dst_idx == 0xFF) {
+        for (uint8_t i = 0; i < WL_PAGE_COUNT; i++) {
+            if (i == src_page) continue;
+            PageHeader_t *hdr = (PageHeader_t *)g_page_addrs[i];
+            if (hdr->sequence < min_seq) {
+                min_seq = hdr->sequence;
+                dst_idx = i;
+            }
+        }
+    }
+
+    if (dst_idx == 0xFF) return FLASH_ERROR;
+
+    /* 3. Erase destination */
+    hal->erase(g_page_addrs[dst_idx]);
+
+    /* 4. Copy valid records from source to destination */
     uint32_t dst_offset = sizeof(PageHeader_t);
     uint32_t src_offset = sizeof(PageHeader_t);
 
     while (src_offset < FLASH_PAGE_SIZE) {
-        FlashRecord_t *rec = (FlashRecord_t *)(GetPageAddr(src_page) + src_offset);
+        FlashRecord_t *rec = (FlashRecord_t *)(g_page_addrs[src_page] + src_offset);
         if (rec->len == 0xFFFFU) break;
 
         if (rec->len != 0) {
-            Flash_Program(GetPageAddr(dst_page) + dst_offset, (uint8_t *)rec, sizeof(FlashRecord_t));
+            hal->program(g_page_addrs[dst_idx] + dst_offset, (uint8_t *)rec, sizeof(FlashRecord_t));
             dst_offset += sizeof(FlashRecord_t);
         }
         src_offset += sizeof(FlashRecord_t);
     }
 
+    /* 5. Update headers */
+    PageHeader_t *old_hdr = (PageHeader_t *)g_page_addrs[src_page];
+    uint32_t new_erase_count = old_hdr->erase_count + 1;
+    uint32_t new_seq = old_hdr->sequence + 1;
+
     PageHeader_t hdr_src = {WL_MAGIC, 0, WL_STATUS_ERASED, 0};
-    PageHeader_t hdr_dst = {WL_MAGIC, 0, WL_STATUS_ACTIVE, 0};
+    PageHeader_t hdr_dst = {WL_MAGIC, new_erase_count, WL_STATUS_ACTIVE, new_seq};
 
-    PageHeader_t *old_hdr = (PageHeader_t *)GetPageAddr(src_page);
-    hdr_dst.erase_count = old_hdr->erase_count + 1;
+    hal->program(g_page_addrs[src_page], (uint8_t *)&hdr_src, sizeof(hdr_src));
+    hal->program(g_page_addrs[dst_idx], (uint8_t *)&hdr_dst, sizeof(hdr_dst));
 
-    Flash_Program(GetPageAddr(src_page), (uint8_t *)&hdr_src, sizeof(hdr_src));
-    Flash_Program(GetPageAddr(dst_page), (uint8_t *)&hdr_dst, sizeof(hdr_dst));
-
-    active_page = dst_page;
+    active_page = dst_idx;
     next_record_offset = dst_offset;
 
     return FLASH_OK;
@@ -271,7 +229,7 @@ FlashStatus_t WL_GarbageCollect(void)
 
 uint32_t WL_GetEraseCount(uint8_t page_idx)
 {
-    if (page_idx > 1) return 0;
-    PageHeader_t *hdr = (PageHeader_t *)GetPageAddr(page_idx);
+    if (page_idx >= WL_PAGE_COUNT) return 0;
+    PageHeader_t *hdr = (PageHeader_t *)g_page_addrs[page_idx];
     return hdr->erase_count;
 }

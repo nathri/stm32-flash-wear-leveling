@@ -31,14 +31,15 @@ typedef enum {
 typedef struct {
     uint32_t magic;         /* 0x574C424D = "WLBM" */
     uint32_t erase_count;
-    uint32_t status;        /* 0xAABBCCDD = ACTIVE, 0x11223344 = FULL, 0x00000000 = ERASED */
-    uint32_t reserved;
+    uint32_t status;        /* ACTIVE, FULL, ERASED */
+    uint32_t sequence;
 } __attribute__((packed)) PageHeader_t;
 
 #define WL_MAGIC            0x574C424DUL
 #define WL_STATUS_ACTIVE    0xAABBCCDDUL
 #define WL_STATUS_FULL      0x11223344UL
 #define WL_STATUS_ERASED    0x00000000UL
+#define WL_STATUS_EMPTY     0xFFFFFFFF
 
 FlashStatus_t WL_Init(void);
 FlashStatus_t WL_WriteRecord(uint16_t id, const uint8_t *data, uint16_t len);
