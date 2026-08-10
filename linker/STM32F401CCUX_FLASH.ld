@@ -85,12 +85,16 @@ SECTIONS
     . = ALIGN(4);
   } >ROM
 
-  .ARM.extab (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  /* Fix : placer .ARM.extab et .ARM.exidx explicitement */
+  .ARM.extab :
   {
-    . = ALIGN(4);
     *(.ARM.extab* .gnu.linkonce.armextab.*)
-    . = ALIGN(4);
-  } >ROM
+  } > FLASH
+
+  .ARM.exidx :
+  {
+    *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+  } > FLASH
 
   .ARM (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {

@@ -1,43 +1,44 @@
-TARGET = flash_wear_leveling
-MCU = STM32F401xx
-CPU = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+# Makefile corrigé
+MCU ?= STM32F401
 
-CC = arm-none-eabi-gcc
-LD = arm-none-eabi-gcc
-OBJCOPY = arm-none-eabi-objcopy
-SIZE = arm-none-eabi-size
+# Common flags
+CFLAGS = -O2 -Wall -g -ffunction-sections -fdata-sections -std=c11 -MMD -MP
+LDFLAGS = -Wl,--gc-sections -specs=nano.specs -specs=nosys.specs
 
-CFLAGS = $(CPU) -D$(MCU) -O2 -Wall -g \
-         -ffunction-sections -fdata-sections \
-         -std=c11 -MMD -MP
+# MCU-specific configuration
+ifeq ($(MCU),STM32F401)
+    CPU_FLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+    DEFS = -DSTM32F401 -DSTM32F401xx
+    LINKER = linker/STM32F401CCUX_FLASH.ld
+    SRCS = src/flash_manager.c src/wl_hal_stm32.c src/main.c
 
-CFLAGS = $(CPU) -D$(MCU) -DSTM32F401xx -O2 -Wall -g \
-         -ffunction-sections -fdata-sections \
-         -std=c11 -MMD -MP
+else ifeq ($(MCU),STM32F767)
+    CPU_FLAGS = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard
+    DEFS = -DSTM32F767 -DSTM32F767xx
+    LINKER = linker/STM32F767ZITX_FLASH.ld
+    SRCS = src/flash_manager.c src/wl_hal_stm32f7.c src/main_f767.c
+endif
 
-LDFLAGS = $(CPU) -T linker/STM32F401CCUX_FLASH.ld \
-          -Wl,--gc-sections -specs=nano.specs -specs=nosys.specs
+CFLAGS += $(CPU_FLAGS) $(DEFS)
+LDFLAGS += $(CPU_FLAGS) -T $(LINKER)
 
-SRCS = $(wildcard src/*.c)
 OBJS = $(SRCS:.c=.o)
+DEPS = $(SRCS:.c=.d)
 
-.PHONY: all clean flash
+.PHONY: all clean
 
-all: $(TARGET).elf $(TARGET).bin
-	$(SIZE) $(TARGET).elf
+all: flash_wear_leveling.bin
 
-$(TARGET).elf: $(OBJS)
-	$(LD) $(LDFLAGS) $^ -o $@
+flash_wear_leveling.elf: $(OBJS)
+	$(CC) $(LDFLAGS) $(OBJS) -o $@
+
+flash_wear_leveling.bin: flash_wear_leveling.elf
+	$(OBJCOPY) -O binary $< $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TARGET).bin: $(TARGET).elf
-	$(OBJCOPY) -O binary $< $@
-
-flash: $(TARGET).bin
-	openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
-	-c "program $(TARGET).bin 0x08000000 verify reset exit"
-
 clean:
-	rm -f $(OBJS) $(TARGET).elf $(TARGET).bin $(TARGET).hex $(SRCS:.c=.d)
+	rm -f $(OBJS) $(DEPS) flash_wear_leveling.elf flash_wear_leveling.bin flash_wear_leveling.hex
+
+-include $(DEPS)
