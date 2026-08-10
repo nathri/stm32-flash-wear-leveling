@@ -1,3 +1,17 @@
+## STM32 Flash Wear-Leveling
+
+![Build F401](https://github.com/nathri/stm32-flash-wear-leveling/actions/workflows/build.yml/badge.svg)
+
+### Supported MCUs
+- **STM32F401** (Cortex-M4, register-level HAL)
+- **STM32F767** (Cortex-M7, HAL_FLASH, dual/single-bank)
+
+### What's new in v2.0
+- Fixed critical data-loss bugs C1-C7 (see commit history)
+- Added STM32F767 support (issue #3)
+- Added Python simulator with fault injection
+- Added interactive HTML visualizer
+
 # STM32 Flash Wear-Leveling Driver
 
 Bare-metal C implementation of a Flash memory wear-leveling manager for STM32 microcontrollers. Designed for EEPROM emulation scenarios where limited erase cycles (typically ~10,000) must be distributed across multiple sectors to maximize lifetime.
