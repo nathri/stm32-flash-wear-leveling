@@ -1,0 +1,38 @@
+name: Build STM32 Wear-Leveling
+
+on:
+  push:
+    branches: [ master, fix/*, port/* ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-f401:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install ARM toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '10.3-2021.10'
+      
+      - name: Build F401
+        run: |
+          make clean
+          make MCU=STM32F401
+
+  build-f767:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install ARM toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '10.3-2021.10'
+      
+      - name: Build F767
+        run: |
+          make clean
+          make MCU=STM32F767
