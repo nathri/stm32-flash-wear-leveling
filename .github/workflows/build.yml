@@ -32,7 +32,7 @@ jobs:
       - name: Syntax check F767 core
         run: |
           # flash_manager.c is HAL-independent — verify it compiles for F767
-          arm-none-eabi-gcc -O2 -Wall -g -std=c11 -MMD -MP \
+          arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
             -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard \
             -DSTM32F767 -DSTM32F767xx \
             -c src/flash_manager.c -o /dev/null
