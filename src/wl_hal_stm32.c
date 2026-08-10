@@ -6,9 +6,9 @@
 #include "wl_config.h"
 #include <string.h>
 
-/* ------------------------------------------------------------------ */
-/* Registres Flash STM32F401 — RM0368 §3.8 (pas de CMSIS)              */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------- */
+/* Registres Flash STM32F401 — RM368 §3.8 (pas de CMSIS)              */
+/* ------------------------------------------------------------------- */
 #define FLASH_R_BASE        0x40023C00UL
 
 #define FLASH_ACR           (*(volatile uint32_t *)(FLASH_R_BASE + 0x00U))
@@ -34,7 +34,10 @@
 #define FLASH_CR_SNB_POS    3U
 #define FLASH_CR_SNB_MSK    (0xFUL << FLASH_CR_SNB_POS)
 #define FLASH_CR_PSIZE_MSK  (0x3UL << 8)
-#define FLASH_CR_PSIZE_X32  (0x2UL << 8)    /* prérequis : VDD 2.7-3.6V */
+#define FLASH_CR_PSIZE_X8   (0x0UL << 8)    /* byte (8-bit) */
+#define FLASH_CR_PSIZE_X16  (0x1UL << 8)    /* half-word (16-bit) */
+#define FLASH_CR_PSIZE_X32  (0x2UL << 8)    /* word (32-bit), VDD 2.7-3.6V */
+#define FLASH_CR_PSIZE_X64  (0x3UL << 8)    /* double-word (64-bit), VDD 2.7-3.6V */
 #define FLASH_CR_STRT       (1UL << 16)
 #define FLASH_CR_LOCK       (1UL << 31)
 
@@ -42,9 +45,9 @@
 #define FLASH_ACR_DCEN      (1UL << 10)
 #define FLASH_ACR_DCRST     (1UL << 12)
 
-/* ------------------------------------------------------------------ */
-/* Secteurs physiques réservés au wear-leveling (RM0368 Table 5)       */
-/* ------------------------------------------------------------------ */
+/* -------------------------------------------------------------------- */
+/* Secteurs physiques réservés au wear-leveling (RM368 Table 5)        */
+/* ------------------------------------------------------------------- */
 typedef struct {
     uint32_t addr;
     uint32_t size;
@@ -56,7 +59,7 @@ static const flash_sector_t wl_sectors[WL_PAGE_COUNT] = {
     { 0x0800C000UL, 16U * 1024U, 3U },
 };
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------- */
 static int flash_unlock(void)
 {
     if ((FLASH_CR & FLASH_CR_LOCK) != 0UL) {
@@ -82,7 +85,7 @@ static void flash_clear_errors(void)
 }
 
 /* RM0368 §3.4.2 : le D-cache ART doit être désactivé pendant son reset.
- * Obligatoire après erase/program, sinon relecture de données périmées. */
+ * Obligatoir après erase/program, sinon relecture de données périmées. */
 static void art_flush_dcache(void)
 {
     const uint32_t acr = FLASH_ACR;
@@ -131,7 +134,26 @@ static int stm32_flash_erase(uint32_t sector_addr)
 
 static int stm32_flash_program(uint32_t addr, const uint8_t *data, uint32_t len)
 {
-    if (((addr & 0x3UL) != 0UL) || (data == NULL) || (len == 0UL)) return -1;
+    uint32_t align_mask;
+    uint32_t psize_bytes;
+
+    if (WL_STM32_PSIZE == FLASH_CR_PSIZE_X8) {
+        align_mask = 0x0UL;
+        psize_bytes = 1U;
+    } else if (WL_STM32_PSIZE == FLASH_CR_PSIZE_X16) {
+        align_mask = 0x1UL;
+        psize_bytes = 2U;
+    } else if (WL_STM32_PSIZE == FLASH_CR_PSIZE_X32) {
+        align_mask = 0x3UL;
+        psize_bytes = 4U;
+    } else if (WL_STM32_PSIZE == FLASH_CR_PSIZE_X64) {
+        align_mask = 0x7UL;
+        psize_bytes = 8U;
+    } else {
+        return -1;
+    }
+
+    if (((addr & align_mask) != 0UL) || (data == NULL) || (len == 0UL)) return -1;
 
     /* Bounds check : la plage entière doit tenir dans UN secteur WL */
     int idx = -1;
@@ -148,16 +170,24 @@ static int stm32_flash_program(uint32_t addr, const uint8_t *data, uint32_t len)
     flash_wait_bsy();
     flash_clear_errors();
 
-    FLASH_CR = (FLASH_CR & ~FLASH_CR_PSIZE_MSK) | FLASH_CR_PSIZE_X32;
+    FLASH_CR = (FLASH_CR & ~FLASH_CR_PSIZE_MSK) | WL_STM32_PSIZE;
     FLASH_CR |= FLASH_CR_PG;
 
     int rc = 0;
-    for (uint32_t i = 0UL; i < len; i += 4UL) {
-        uint32_t word = 0xFFFFFFFFUL;
-        const uint32_t chunk = ((len - i) < 4UL) ? (len - i) : 4UL;
-        memcpy(&word, &data[i], chunk);
+    for (uint32_t i = 0UL; i < len; i += psize_bytes) {
+        uint64_t value = 0xFFFFFFFFFFFFFFFFULL;
+        const uint32_t chunk = ((len - i) < psize_bytes) ? (len - i) : psize_bytes;
+        memcpy(&value, &data[i], chunk);
 
-        *(volatile uint32_t *)(addr + i) = word;
+        if (psize_bytes == 1U) {
+            *(volatile uint8_t *)(addr + i)  = (uint8_t)value;
+        } else if (psize_bytes == 2U) {
+            *(volatile uint16_t *)(addr + i) = (uint16_t)value;
+        } else if (psize_bytes == 4U) {
+            *(volatile uint32_t *)(addr + i) = (uint32_t)value;
+        } else {
+            *(volatile uint64_t *)(addr + i) = value;
+        }
         flash_wait_bsy();
 
         if ((FLASH_SR & FLASH_SR_ERRORS) != 0UL) { rc = -1; break; }

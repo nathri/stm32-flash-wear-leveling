@@ -7,10 +7,10 @@
  *
  * Mode banque (option byte nDBANK, FLASH_OPTCR) :
  *   WL_F767_DUAL_BANK = 1 -> dual-bank   (nDBANK = 0)
- *   WL_F767_DUAL_BANK = 0 -> single-bank (nDBANK = 1, défaut usine)
+ *   WL_F767_DUAL_BANK = 0 -> single-bank (nDBANK = 1, défaut using)
  *
  * La cohérence entre ce define et l'option byte réelle est vérifiée à
- * l'exécution dans WL_Init (hal->init) : mismatch => FLASH_ERROR.
+ * l'exècution dans WL_Init (hal->init) : mismatch => FLASH_ERROR.
  */
 #ifndef WL_F767_DUAL_BANK
 #define WL_F767_DUAL_BANK   1
@@ -45,6 +45,18 @@
 #define WL_F7_SECTOR1_ADDR  0x080C0000UL
 #define WL_F7_SECTOR1_SNB   7U
 
+#endif
+
+/*
+ * Type de programmation Flash HAL — issue #4 :
+ *   WL_F7_FLASH_PSIZE = FLASH_TYPEPROGRAM_BYTE       -> byte (8-bit)
+ *   WL_F7_FLASH_PSIZE = FLASH_TYPEPROGRAM_HALFWORD   -> half-word (16-bit)
+ *   WL_F7_FLASH_PSIZE = FLASH_TYPEPROGRAM_WORD       -> word (32-bit, défaut)
+ *   WL_F7_FLASH_PSIZE = FLASH_TYPEPROGRAM_DOUBLEWORD -> double-word (64-bit)
+ * Prérequis x32/x64 : VDD 2.7-3.6V (voir RM0410 §3.4).
+ */
+#ifndef WL_F7_FLASH_PSIZE
+#define WL_F7_FLASH_PSIZE  FLASH_TYPEPROGRAM_WORD
 #endif
 
 /* Vérifications compile-time (C11) */
