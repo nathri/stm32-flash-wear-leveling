@@ -1,3 +1,4 @@
+cat > .gitignore << 'EOF'
 # Build artifacts
 *.o
 *.d
@@ -6,10 +7,12 @@
 *.hex
 *.map
 
+# Generated files
+results.json
+wl_viz_*.html
+
 # IDE
 .vscode/
-*.code-workspace
-
-# OS
-.DS_Store
-Thumbs.db
+*.uvguix.*
+*.uvoptx
+EOF
