@@ -36,10 +36,9 @@ static const flash_sector_t wl_sectors[WL_PAGE_COUNT] = {
  * et dimensionner le timeout IWDG > 2x le temps d'erase max du secteur.
  */
 __weak void wl_f7_watchdog_refresh(void)
-{
-}
+{}
 
-/* ------------------------------------------------------------------ */
+/* -------------------------------------------------------------------- */
 /* Cortex-M7 : maintenance D-cache autour des opérations Flash.
  * SCB_*DCache_by_Addr exige une adresse et une taille alignées sur 32. */
 static void dcache_clean_range(uint32_t addr, uint32_t len)
@@ -58,10 +57,10 @@ static void dcache_invalidate_range(uint32_t addr, uint32_t len)
     SCB_InvalidateDCache_by_Addr((uint32_t *)start, (int32_t)size);
 }
 
-/* ------------------------------------------------------------------ */
+/* -------------------------------------------------------------------- */
 static bool f7_flash_init(void)
 {
-    /* Cohérence entre WL_F767_DUAL_BANK et l'option byte nDBANK (RM0410) :
+    /* Cohérence entre WL_F767_DUAL_BANK et l'option byte nDBANK (RM01410) :
      * nDBANK = 0 -> dual-bank ; nDBANK = 1 -> single-bank.
      * Un mismatch remapperait tous les secteurs => refus de démarrer. */
     const bool hw_dual_bank = ((FLASH->OPTCR & FLASH_OPTCR_nDBANK) == 0U);
@@ -105,7 +104,31 @@ static int f7_flash_erase(uint32_t sector_addr)
 
 static int f7_flash_program(uint32_t addr, const uint8_t *data, uint32_t len)
 {
-    if (((addr & 0x3UL) != 0UL) || (data == NULL) || (len == 0UL)) return -1;
+    uint32_t align_mask;
+    uint32_t psize_bytes;
+
+    switch (WL_F7_FLASH_PSIZE) {
+        case FLASH_TYPEPROGRAM_BYTE:
+            align_mask = 0x0UL;
+            psize_bytes = 1U;
+            break;
+        case FLASH_TYPEPROGRAM_HALFWORD:
+            align_mask = 0x1UL;
+            psize_bytes = 2U;
+            break;
+        case FLASH_TYPEPROGRAM_WORD:
+            align_mask = 0x3UL;
+            psize_bytes = 4U;
+            break;
+        case FLASH_TYPEPROGRAM_DOUBLEWORD:
+            align_mask = 0x7UL;
+            psize_bytes = 8U;
+            break;
+        default:
+            return -1;
+    }
+
+    if (((addr & align_mask) != 0UL) || (data == NULL) || (len == 0UL)) return -1;
 
     /* Bounds check : la plage entière doit tenir dans UN secteur WL */
     int idx = -1;
@@ -125,13 +148,12 @@ static int f7_flash_program(uint32_t addr, const uint8_t *data, uint32_t len)
                            FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_ERSERR);
 
     int rc = 0;
-    for (uint32_t i = 0UL; i < len; i += 4UL) {
-        uint32_t word = 0xFFFFFFFFUL;
-        const uint32_t chunk = ((len - i) < 4UL) ? (len - i) : 4UL;
-        memcpy(&word, &data[i], chunk);
+    for (uint32_t i = 0UL; i < len; i += psize_bytes) {
+        uint64_t value = 0xFFFFFFFFFFFFFFFFULL;
+        const uint32_t chunk = ((len - i) < psize_bytes) ? (len - i) : psize_bytes;
+        memcpy(&value, &data[i], chunk);
 
-        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr + i,
-                              (uint64_t)word) != HAL_OK) {
+        if (HAL_FLASH_Program(WL_F7_FLASH_PSIZE, addr + i, value) != HAL_OK) {
             rc = -1;               /* détail : HAL_FLASH_GetError() */
             break;
         }
@@ -158,7 +180,7 @@ static uint32_t f7_get_sector_addr(uint8_t idx)
     return (idx < WL_PAGE_COUNT) ? wl_sectors[idx].addr : 0UL;
 }
 
-/* ------------------------------------------------------------------ */
+/* -------------------------------------------------------------------- */
 static const wl_hal_t f7_hal = {
     .init            = f7_flash_init,
     .erase           = f7_flash_erase,

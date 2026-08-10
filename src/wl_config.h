@@ -22,6 +22,18 @@
 #define WL_PAGE_COUNT   2U
 #define WL_PAGE_SIZE    (16U * 1024U)
 
+/*
+ * Taille de programmation Flash (PSIZE) — issue #4 :
+ *   WL_STM32_PSIZE = FLASH_CR_PSIZE_X8   -> byte (8-bit)
+ *   WL_STM32_PSIZE = FLASH_CR_PSIZE_X16  -> half-word (16-bit)
+ *   WL_STM32_PSIZE = FLASH_CR_PSIZE_X32  -> word (32-bit, défaut)
+ *   WL_STM32_PSIZE = FLASH_CR_PSIZE_X64  -> double-word (64-bit)
+ * Prérequis x32/x64 : VDD 2.7-3.6V (voir RM0368 §3.4).
+ */
+#ifndef WL_STM32_PSIZE
+#define WL_STM32_PSIZE  FLASH_CR_PSIZE_X32
+#endif
+
 #endif
 
 #endif
