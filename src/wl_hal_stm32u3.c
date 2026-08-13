@@ -20,6 +20,7 @@
 #include "wl_config.h"
 #include "stm32u3xx_hal.h"   /* CubeMX genere stm32u3xx_hal.h ou equivalent */
 #include <string.h>
+#include <stdint.h>
 
 typedef struct {
     uint32_t addr;
