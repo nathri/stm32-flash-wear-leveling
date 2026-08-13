@@ -1,5 +1,5 @@
 # STM32 Flash Wear-Leveling — Makefile
-# Supports: STM32F401, STM32F767
+# Supports: STM32F401, STM32F767, STM32U385
 
 MCU ?= STM32F401
 
@@ -25,8 +25,14 @@ else ifeq ($(MCU),STM32F767)
     LINKER    = linker/STM32F767ZITX_FLASH.ld
     SRCS      = src/flash_manager.c src/wl_hal_stm32f7.c src/main_f767.c
 
+else ifeq ($(MCU),STM32U385)
+    CPU_FLAGS = -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard
+    DEFS      = -DSTM32U385 -DSTM32U385xx
+    LINKER    = linker/STM32U385RGtx_FLASH.ld
+    SRCS      = src/flash_manager.c src/wl_config_u385.c src/main_u385.c
+
 else
-    $(error Unknown MCU: $(MCU). Use STM32F401 or STM32F767)
+    $(error Unknown MCU: $(MCU). Use STM32F401, STM32F767, or STM32U385)
 endif
 
 CFLAGS  += $(CPU_FLAGS) $(DEFS)
