@@ -39,8 +39,7 @@ jobs:
           echo "F767 core syntax OK"
           echo "Note: wl_hal_stm32f7.c requires stm32f7xx_hal.h from STM32CubeF7"
 
-
-build-u385:
+  build-u385:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +49,6 @@ build-u385:
           release: '10.3-2021.10'
       - name: Syntax check U385 core
         run: |
-          # flash_manager.c is HAL-independent — verify it compiles for U385
           arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
             -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard \
             -DSTM32U385 -DSTM32U385xx \
