@@ -40,7 +40,7 @@ jobs:
           echo "Note: wl_hal_stm32f7.c requires stm32f7xx_hal.h from STM32CubeF7"
 
 
-  build-u385:
+build-u385:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,16 +50,10 @@ jobs:
           release: '10.3-2021.10'
       - name: Syntax check U385 core
         run: |
+          # flash_manager.c is HAL-independent — verify it compiles for U385
           arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
             -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard \
             -DSTM32U385 -DSTM32U385xx \
             -c src/flash_manager.c -o /dev/null
           echo "U385 core syntax OK"
-      - name: Syntax check U385 HAL
-        run: |
-          arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
-            -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard \
-            -DSTM32U385 -DSTM32U385xx \
-            -I. \
-            -c src/wl_hal_stm32u3.c -o /dev/null
-          echo "U385 HAL syntax OK"
+          echo "Note: wl_hal_stm32u3.c requires stm32u3xx_hal.h from STM32CubeU3"
