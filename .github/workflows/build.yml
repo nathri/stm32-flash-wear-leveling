@@ -46,6 +46,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
         uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '10.3-2021.10'
       - name: Syntax check U385 core
         run: |
           arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
@@ -53,3 +55,11 @@ jobs:
             -DSTM32U385 -DSTM32U385xx \
             -c src/flash_manager.c -o /dev/null
           echo "U385 core syntax OK"
+      - name: Syntax check U385 HAL
+        run: |
+          arm-none-eabi-gcc -O2 -Wall -g -std=c11 \
+            -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard \
+            -DSTM32U385 -DSTM32U385xx \
+            -I. \
+            -c src/wl_hal_stm32u3.c -o /dev/null
+          echo "U385 HAL syntax OK"
